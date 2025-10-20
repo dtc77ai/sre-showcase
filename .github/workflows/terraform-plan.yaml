@@ -1,0 +1,219 @@
+name: Terraform - Plan
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-plan.yaml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.6.0
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: |
+          cd terraform
+          terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        run: |
+          cd terraform
+          terraform validate
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    # Only run if:
+    # 1. It's a push to main, OR
+    # 2. It's a PR from the same repo (not a fork)
+    if: |
+      github.event_name == 'push' || 
+      github.event.pull_request.head.repo.full_name == github.repository
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create terraform.tfvars
+        run: |
+          cd terraform
+          cat > terraform.tfvars << EOF
+          aws_region        = "${{ env.AWS_REGION }}"
+          project_name      = "sre-showcase"
+          environment       = "demo"
+          slack_webhook_url = "${{ secrets.SLACK_WEBHOOK_URL }}"
+          github_repo       = "${{ github.repository }}"
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd terraform
+          terraform plan -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Save plan output
+        if: steps.plan.outcome == 'success'
+        run: |
+          cd terraform
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Comment PR with plan
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/plan.txt', 'utf8');
+            const output = `#### Terraform Plan 📖
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+            
+            </details>
+            
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  terraform-cost-estimate:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    # Only run on PRs from same repo
+    if: |
+      github.event_name == 'pull_request' && 
+      github.event.pull_request.head.repo.full_name == github.repository
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create terraform.tfvars
+        run: |
+          cd terraform
+          cat > terraform.tfvars << EOF
+          aws_region        = "${{ env.AWS_REGION }}"
+          project_name      = "sre-showcase"
+          environment       = "demo"
+          slack_webhook_url = "${{ secrets.SLACK_WEBHOOK_URL }}"
+          github_repo       = "${{ github.repository }}"
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Generate plan for Infracost
+        run: |
+          cd terraform
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > plan.json
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost cost estimate
+        run: |
+          cd terraform
+          infracost breakdown --path plan.json --format json --out-file infracost.json || echo "Infracost not configured"
+
+      - name: Post cost estimate comment
+        if: hashFiles('terraform/infracost.json') != ''
+        uses: infracost/actions/comment@v1
+        with:
+          path: terraform/infracost.json
+          behavior: update
+
+  security-scan:
+    name: Security Scan (tfsec)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform
+          soft_fail: true
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform
+          framework: terraform
+          soft_fail: true

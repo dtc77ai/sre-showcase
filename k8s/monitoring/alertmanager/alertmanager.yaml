@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      slack_api_url_file: '/etc/secrets/webhook-url'
+    
+    route:
+      receiver: 'slack-notifications'
+      group_by: ['alertname']
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 12h
+    
+    receivers:
+      - name: 'slack-notifications'
+        slack_configs:
+          - channel: '#sre-alerts'
+            title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+            text: |
+              *Alert:* {{ .GroupLabels.alertname }}
+              *Severity:* {{ .CommonLabels.severity }}
+              {{ range .Alerts }}
+              *Description:* {{ .Annotations.description }}
+              *Summary:* {{ .Annotations.summary }}
+              {{ end }}
+            send_resolved: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+      - name: alertmanager
+        image: prom/alertmanager:v0.26.0
+        args:
+          - '--config.file=/etc/alertmanager/alertmanager.yml'
+          - '--storage.path=/alertmanager'
+        ports:
+        - containerPort: 9093
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/alertmanager
+        - name: secrets
+          mountPath: /etc/secrets
+          readOnly: true
+        - name: storage
+          mountPath: /alertmanager
+      volumes:
+      - name: config
+        configMap:
+          name: alertmanager-config
+      - name: secrets
+        secret:
+          secretName: alertmanager-slack-webhook
+      - name: storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  selector:
+    app: alertmanager
+  ports:
+  - port: 9093
+    targetPort: 9093
+  type: ClusterIP

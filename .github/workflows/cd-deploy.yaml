@@ -1,0 +1,154 @@
+name: CD - Deploy to EKS
+
+on:
+  # Manual trigger only
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'demo'
+        type: choice
+        options:
+          - demo
+          - dev
+          - staging
+      image_tag:
+        description: 'Docker image tag to deploy (default: latest from main)'
+        required: false
+        default: 'latest'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/sre-app
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.0'
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name sre-showcase-${{ github.event.inputs.environment }}
+
+      - name: Verify cluster connection
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+      - name: Determine image tag
+        id: image
+        run: |
+          if [ "${{ github.event.inputs.image_tag }}" == "latest" ]; then
+            # Get the latest image from main branch
+            IMAGE_TAG=$(git rev-parse HEAD)
+          else
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          fi
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "Using image tag: ${IMAGE_TAG}"
+
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/sre-app \
+            sre-app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -n sre-app
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/sre-app -n sre-app --timeout=5m
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n sre-app
+          kubectl get svc -n sre-app
+
+      - name: Run smoke tests
+        run: |
+          # Get the service endpoint
+          APP_URL=$(kubectl get svc sre-app -n sre-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          
+          echo "Testing application at: http://${APP_URL}"
+          
+          # Wait for load balancer
+          sleep 30
+          
+          # Test health endpoint
+          curl -f http://${APP_URL}/health || exit 1
+          
+          # Test API endpoint
+          curl -f http://${APP_URL}/api/data || exit 1
+          
+          echo "✅ Smoke tests passed!"
+
+      - name: Get application URL
+        id: app-url
+        run: |
+          APP_URL=$(kubectl get svc sre-app -n sre-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "url=${APP_URL}" >> $GITHUB_OUTPUT
+
+      - name: Deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster:** sre-showcase-${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** sre-app" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Application URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- **App:** http://${{ steps.app-url.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health:** http://${{ steps.app-url.outputs.url }}/health" >> $GITHUB_STEP_SUMMARY
+          echo "- **Metrics:** http://${{ steps.app-url.outputs.url }}/metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docs:** http://${{ steps.app-url.outputs.url }}/docs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Deployed Pods" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n sre-app >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  notify-slack:
+    name: Notify Slack
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always()
+    
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "Deployment ${{ needs.deploy.result }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deployment Status:* ${{ needs.deploy.result == 'success' && '✅ Success' || '❌ Failed' }}\n*Environment:* ${{ github.event.inputs.environment }}\n*Image Tag:* ${{ github.event.inputs.image_tag }}\n*Triggered by:* ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

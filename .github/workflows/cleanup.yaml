@@ -1,0 +1,120 @@
+name: Cleanup - Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm'
+        required: true
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'demo'
+        type: choice
+        options:
+          - demo
+          - dev
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.6.0
+
+jobs:
+  destroy:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "destroy" ]; then
+            echo "❌ Confirmation failed. You must type 'destroy' to proceed."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create terraform.tfvars
+        run: |
+          cd terraform
+          cat > terraform.tfvars << EOF
+          aws_region        = "${{ env.AWS_REGION }}"
+          project_name      = "sre-showcase"
+          environment       = "${{ github.event.inputs.environment }}"
+          slack_webhook_url = "${{ secrets.SLACK_WEBHOOK_URL }}"
+          github_repo       = "${{ github.repository }}"
+          EOF
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Destroy
+        run: |
+          cd terraform
+          terraform destroy -auto-approve
+
+      - name: Verify cleanup
+        run: |
+          echo "Verifying all resources are destroyed..."
+          
+          # Check for EKS clusters
+          CLUSTERS=$(aws eks list-clusters --region ${{ env.AWS_REGION }} --query 'clusters[?contains(@, `sre-showcase`)]' --output text)
+          if [ -n "$CLUSTERS" ]; then
+            echo "⚠️ Warning: EKS clusters still exist: $CLUSTERS"
+          else
+            echo "✅ No EKS clusters found"
+          fi
+          
+          # Check for EC2 instances
+          INSTANCES=$(aws ec2 describe-instances \
+            --region ${{ env.AWS_REGION }} \
+            --filters "Name=tag:Project,Values=sre-showcase" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          if [ -n "$INSTANCES" ]; then
+            echo "⚠️ Warning: EC2 instances still running: $INSTANCES"
+          else
+            echo "✅ No EC2 instances found"
+          fi
+
+      - name: Cleanup summary
+        run: |
+          echo "## Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Infrastructure destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1.25.0
+        with:
+          payload: |
+            {
+              "text": "🗑️ Infrastructure Destroyed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Infrastructure Destroyed*\n*Environment:* ${{ github.event.inputs.environment }}\n*Triggered by:* ${{ github.actor }}\n*Timestamp:* $(date -u)"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

@@ -1,0 +1,80 @@
+# Copy this file to terraform.tfvars and fill in your values
+# DO NOT commit terraform.tfvars (it's in .gitignore)
+
+# ============================================================================
+# REQUIRED VARIABLES
+# ============================================================================
+
+# Slack webhook URL for alerts (REQUIRED)
+# Get this from: https://api.slack.com/apps → Your App → Incoming Webhooks
+slack_webhook_url = "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# GitHub repository for container images (REQUIRED)
+# Format: username/repository
+github_repo = "yourusername/sre-showcase"
+
+# ============================================================================
+# AWS CONFIGURATION
+# ============================================================================
+
+# AWS region for resources
+aws_region = "us-east-1"
+
+# Project name (used for resource naming)
+project_name = "sre-showcase"
+
+# Environment name (demo, dev, staging, prod)
+# Note: This is overridden by terraform workspace if not "default"
+environment = "demo"
+
+# ============================================================================
+# NETWORKING
+# ============================================================================
+
+# VPC CIDR block
+vpc_cidr = "10.0.0.0/16"
+
+# Availability zones (must be in the selected region)
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# ============================================================================
+# EKS CONFIGURATION
+# ============================================================================
+
+# Kubernetes version
+cluster_version = "1.28"
+
+# Use spot instances for cost savings (recommended for demo)
+enable_spot_instances = true
+
+# EC2 instance types for nodes
+node_instance_types = ["t3.small"]
+
+# Node group sizing
+node_desired_size = 2
+node_min_size     = 1
+node_max_size     = 3
+
+# ============================================================================
+# APPLICATION CONFIGURATION
+# ============================================================================
+
+# Docker image tag to deploy
+app_image_tag = "latest"
+
+# ============================================================================
+# MONITORING CONFIGURATION
+# ============================================================================
+
+# Grafana admin password (leave empty to auto-generate)
+grafana_admin_password = ""
+
+# ============================================================================
+# ADDITIONAL TAGS
+# ============================================================================
+
+tags = {
+  Owner       = "Your Name"
+  Purpose     = "SRE Showcase"
+  CostCenter  = "Personal"
+}
