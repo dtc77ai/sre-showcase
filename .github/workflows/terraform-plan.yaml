@@ -181,7 +181,7 @@ jobs:
           terraform show -json tfplan.binary > plan.json
 
       - name: Setup Infracost
-        uses: infracost/actions/setup@v2
+        uses: infracost/actions/setup@v3
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
@@ -192,7 +192,7 @@ jobs:
 
       - name: Post cost estimate comment
         if: hashFiles('terraform/infracost.json') != ''
-        uses: infracost/actions/comment@v1
+        uses: infracost/actions/comment@v3
         with:
           path: terraform/infracost.json
           behavior: update
