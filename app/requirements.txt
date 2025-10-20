@@ -1,5 +1,5 @@
 # FastAPI and ASGI server
-fastapi==0.104.1
+fastapi==0.119.1
 uvicorn[standard]==0.24.0
 
 # Prometheus metrics
