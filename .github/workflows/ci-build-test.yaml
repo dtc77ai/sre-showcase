@@ -61,6 +61,9 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     
     steps:
       - name: Checkout code
@@ -111,7 +114,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -128,7 +131,7 @@ jobs:
       - name: Run Trivy vulnerability scanner (image)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
 
@@ -147,11 +150,11 @@ jobs:
 
       - name: Pull and test image
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
           
           # Run container
           docker run -d -p 8000:8000 --name test-app \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
           
           # Wait for app to start
           sleep 10
@@ -171,7 +174,7 @@ jobs:
 
       - name: Image size check
         run: |
-          IMAGE_SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} --format='{{.Size}}')
+          IMAGE_SIZE=$(docker image inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }} --format='{{.Size}}')
           IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
           echo "Image size: ${IMAGE_SIZE_MB}MB"
           
@@ -198,4 +201,4 @@ jobs:
           echo "- Build and Push: ${{ needs.build-and-push.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Test Docker Image: ${{ needs.test-docker-image.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
