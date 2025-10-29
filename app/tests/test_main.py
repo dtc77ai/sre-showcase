@@ -5,12 +5,11 @@ Unit tests for SRE Showcase API
 import pytest
 import sys
 from pathlib import Path
+from fastapi.testclient import TestClient
+from main import app, app_state
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from fastapi.testclient import TestClient
-from main import app, app_state
 
 client = TestClient(app)
 
