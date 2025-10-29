@@ -41,6 +41,23 @@ This project is designed to be **cost-effective** for demos and learning, with i
 
 ---
 
+### Real Example
+
+After running the project for two hours (including all [incident scenarios](./04-incident-scenarios.md)), the **Cost and usage graph** in the AWS console showed:
+
+| Service  | 120-Min Cost |
+|:---------|:-------------|
+| Elastic Container Service for Kubernetes | $1.30 |
+| EC2-Other | $0.27 |
+| Elastic Load Balancing | $0.10 |
+| VPC | $0.05 |
+| EC2-Instances | $0.03 |
+| **Total** | **$1.76** |
+
+*Keep in mind that the costs of **Elastic Container Service for Kubernetes** increase rapidly with time and also has a fixed cost each time a cluster is created.*
+
+---
+
 ## Cost Optimization Strategies
 
 ### 1. Spot Instances (Implemented)

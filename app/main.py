@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
     logger.info("SRE Showcase API Starting")
     logger.info("=" * 50)
-    logger.info(f"Version: 1.0.0")
+    logger.info("Version: 1.0.0")
     logger.info(f"Start time: {app_state['start_time'].isoformat()}")
     logger.info("Application ready to serve requests")
     logger.info("=" * 50)
