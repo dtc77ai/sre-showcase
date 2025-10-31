@@ -35,6 +35,7 @@ module "eks" {
   cluster_version = var.cluster_version
 
   vpc_id             = module.vpc.vpc_id
+  vpc_cidr           = module.vpc.vpc_cidr  # Add this line
   private_subnet_ids = module.vpc.private_subnet_ids
 
   node_desired_size     = local.selected_node_config.desired_size
