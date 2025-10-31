@@ -12,6 +12,81 @@ resource "aws_vpc" "main" {
   )
 }
 
+# VPC Flow Logs (CKV2_AWS_11)
+resource "aws_flow_log" "main" {
+  iam_role_arn    = aws_iam_role.vpc_flow_log.arn
+  log_destination = aws_cloudwatch_log_group.vpc_flow_log.arn
+  traffic_type    = "ALL"
+  vpc_id          = aws_vpc.main.id
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.project_name}-${var.environment}-vpc-flow-log"
+    }
+  )
+}
+
+resource "aws_cloudwatch_log_group" "vpc_flow_log" {
+  name              = "/aws/vpc/${var.project_name}-${var.environment}"
+  retention_in_days = 7
+
+  tags = var.tags
+}
+
+resource "aws_iam_role" "vpc_flow_log" {
+  name = "${var.project_name}-${var.environment}-vpc-flow-log-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "vpc-flow-logs.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "vpc_flow_log" {
+  name = "${var.project_name}-${var.environment}-vpc-flow-log-policy"
+  role = aws_iam_role.vpc_flow_log.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ]
+        Effect = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Default Security Group - Restrict all traffic (CKV2_AWS_12)
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  # No ingress or egress rules - denies all traffic
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.project_name}-${var.environment}-default-sg-restricted"
+    }
+  )
+}
+
 # Internet Gateway
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
@@ -24,14 +99,14 @@ resource "aws_internet_gateway" "main" {
   )
 }
 
-# Public Subnets
+# Public Subnets (CKV_AWS_130 - disable auto-assign public IP)
 resource "aws_subnet" "public" {
   count = length(var.availability_zones)
 
   vpc_id                  = aws_vpc.main.id
   cidr_block              = cidrsubnet(var.vpc_cidr, 4, count.index)
   availability_zone       = var.availability_zones[count.index]
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = false  # Changed from true to false
 
   tags = merge(
     var.tags,

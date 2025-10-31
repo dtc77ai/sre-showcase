@@ -27,18 +27,11 @@ resource "aws_iam_role_policy_attachment" "cluster_vpc_resource_controller" {
   role       = aws_iam_role.cluster.name
 }
 
-# EKS Cluster Security Group
+# EKS Cluster Security Group (CKV_AWS_23, CKV_AWS_382)
 resource "aws_security_group" "cluster" {
   name        = "${var.cluster_name}-cluster-sg"
-  description = "Security group for EKS cluster"
+  description = "Security group for EKS cluster control plane"
   vpc_id      = var.vpc_id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   tags = merge(
     var.tags,
@@ -48,7 +41,47 @@ resource "aws_security_group" "cluster" {
   )
 }
 
-# EKS Cluster
+# Separate egress rule with description (CKV_AWS_23)
+resource "aws_security_group_rule" "cluster_egress_https" {
+  type              = "egress"
+  description       = "Allow HTTPS traffic to worker nodes"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.cluster.id
+}
+
+resource "aws_security_group_rule" "cluster_egress_kubelet" {
+  type              = "egress"
+  description       = "Allow kubelet communication to worker nodes"
+  from_port         = 10250
+  to_port           = 10250
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.cluster.id
+}
+
+# KMS key for EKS secrets encryption (CKV_AWS_58)
+resource "aws_kms_key" "eks" {
+  description             = "EKS Secret Encryption Key for ${var.cluster_name}"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.cluster_name}-eks-secrets-key"
+    }
+  )
+}
+
+resource "aws_kms_alias" "eks" {
+  name          = "alias/${var.cluster_name}-eks-secrets"
+  target_key_id = aws_kms_key.eks.key_id
+}
+
+# EKS Cluster (CKV_AWS_39, CKV_AWS_38, CKV_AWS_58)
 resource "aws_eks_cluster" "main" {
   name     = var.cluster_name
   role_arn = aws_iam_role.cluster.arn
@@ -57,8 +90,17 @@ resource "aws_eks_cluster" "main" {
   vpc_config {
     subnet_ids              = var.private_subnet_ids
     endpoint_private_access = true
-    endpoint_public_access  = true
+    endpoint_public_access  = false  # Changed from true to false (CKV_AWS_39)
     security_group_ids      = [aws_security_group.cluster.id]
+    # public_access_cidrs is not needed when endpoint_public_access = false (CKV_AWS_38)
+  }
+
+  # Enable secrets encryption (CKV_AWS_58)
+  encryption_config {
+    provider {
+      key_arn = aws_kms_key.eks.arn
+    }
+    resources = ["secrets"]
   }
 
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
