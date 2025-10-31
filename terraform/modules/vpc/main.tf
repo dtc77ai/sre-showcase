@@ -109,7 +109,7 @@ resource "aws_iam_role_policy" "vpc_flow_log" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "CloudWatchLogsWrite"
+        Sid = "CloudWatchLogsWrite"
         Action = [
           "logs:CreateLogStream",
           "logs:PutLogEvents",
