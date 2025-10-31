@@ -62,11 +62,63 @@ resource "aws_security_group_rule" "cluster_egress_kubelet" {
   security_group_id = aws_security_group.cluster.id
 }
 
-# KMS key for EKS secrets encryption (CKV_AWS_58)
+# Data sources for account and region
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# KMS key for EKS secrets encryption (CKV_AWS_58, CKV2_AWS_64)
 resource "aws_kms_key" "eks" {
   description             = "EKS Secret Encryption Key for ${var.cluster_name}"
   deletion_window_in_days = 10
   enable_key_rotation     = true
+
+  # Key policy (CKV2_AWS_64)
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow EKS to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:CreateGrant",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow cluster role to use the key"
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.cluster.arn
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:CreateGrant",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 
   tags = merge(
     var.tags,
