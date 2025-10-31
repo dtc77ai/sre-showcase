@@ -142,7 +142,7 @@ resource "aws_eks_cluster" "main" {
   vpc_config {
     subnet_ids              = var.private_subnet_ids
     endpoint_private_access = true
-    endpoint_public_access  = false  # Changed from true to false (CKV_AWS_39)
+    endpoint_public_access  = false # Changed from true to false (CKV_AWS_39)
     security_group_ids      = [aws_security_group.cluster.id]
     # public_access_cidrs is not needed when endpoint_public_access = false (CKV_AWS_38)
   }
